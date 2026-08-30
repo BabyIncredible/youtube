@@ -12,6 +12,8 @@ from typing import Sequence
 
 from youtube_automation.config import load_config
 from youtube_automation.providers.mock import MockLLMProvider
+from youtube_automation.providers.openai import OpenAIProvider
+from youtube_automation.services.script_service import ScriptService
 from youtube_automation.services.topic_service import TopicService
 from youtube_automation.state import PipelineState
 from youtube_automation.utils.files import atomic_write_json
@@ -31,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="start a new pipeline run")
     run_parser.add_argument("--topic")
     run_parser.add_argument("--privacy", choices=("private", "unlisted", "public"), default="private")
-    run_parser.add_argument("--mock-providers", action="store_true", required=True)
+    run_parser.add_argument("--mock-providers", action="store_true")
     run_parser.add_argument("--dry-run", action="store_true")
     run_parser.add_argument("--no-upload", action="store_true")
 
@@ -40,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace) -> int:
-    config, _environment = load_config(args.config)
+    config, environment = load_config(args.config)
     topics = TopicService(Path("topics.csv"))
     claimed_topic_id: str | None = None
     run_id = _run_id(args.topic or "queued-topic")
@@ -61,10 +63,20 @@ def _run(args: argparse.Namespace) -> int:
     run_directory.mkdir(parents=True, exist_ok=False)
     state = PipelineState(run_id=run_id, topic_id=claimed_topic_id)
     state.start_stage("plan_generated")
-    plan = MockLLMProvider().generate_video_plan(topic_title, audience, ())
+    if args.mock_providers:
+        provider = MockLLMProvider()
+    else:
+        provider = OpenAIProvider(
+            api_key=environment.llm_api_key or "",
+            model=environment.llm_model or "",
+            retry_attempts=config.pipeline.retry_attempts,
+        )
+    plan, review = ScriptService(provider).generate_and_review(topic_title, audience)
     plan_path = run_directory / "video_plan.json"
+    review_path = run_directory / "review.json"
     atomic_write_json(plan_path, plan.model_dump(mode="json"))
-    state.complete_stage("plan_generated", [plan_path])
+    atomic_write_json(review_path, review.model_dump(mode="json"))
+    state.complete_stage("plan_generated", [plan_path, review_path])
     state.save(run_directory / "state.json")
     print(json.dumps({"run_id": run_id, "output_directory": str(run_directory)}, indent=2))
     return 0

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from youtube_automation.models import Scene, ThumbnailPlan, VideoPlan
+from youtube_automation.models import ReviewResult, Scene, ThumbnailPlan, VideoPlan
 
 
 class MockLLMProvider:
     """Create a repeatable, valid educational video plan."""
 
     def generate_video_plan(
-        self, topic: str, audience: str, sources: Sequence[str]
+        self,
+        topic: str,
+        audience: str,
+        sources: Sequence[str],
+        correction: str | None = None,
     ) -> VideoPlan:
         """Return five distinct scenes suitable for exercising later stages."""
         source_urls = list(sources)
@@ -40,4 +44,12 @@ class MockLLMProvider:
             scenes=scenes,
             thumbnail=ThumbnailPlan(text="Firmware Made Clear", image_prompt=topic),
             contains_realistic_synthetic_media=False,
+        )
+
+    def review_video_plan(self, plan: VideoPlan) -> ReviewResult:
+        """Approve deterministic mock plans after exercising the review contract."""
+        return ReviewResult(
+            approved=True,
+            issues=[],
+            summary=f"Mock review approved {len(plan.scenes)} scenes.",
         )

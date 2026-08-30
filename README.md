@@ -5,10 +5,30 @@ educational, faceless YouTube videos. Python coordinates the workflow while
 replaceable providers generate content and FFmpeg performs media processing.
 
 > [!IMPORTANT]
-> The repository currently contains **Phase 1**. Configuration, validated video
-> plans, atomic topic selection, pipeline state, mock planning, and the CLI work.
-> Audio, images, rendering, quality checks, resume commands, and YouTube upload
-> are on the roadmap and are not yet implemented.
+> The repository currently contains **Phases 1 and 2**. Configuration, validated
+> video plans, atomic topic selection, pipeline state, mock planning, real OpenAI
+> structured generation, editorial review, and the CLI work. Audio, images,
+> rendering, quality checks, resume commands, and YouTube upload are on the
+> roadmap and are not yet implemented.
+
+## Purpose
+
+This repository is building an automated production line for original,
+educational YouTube videos that do not require an on-camera presenter. A future
+complete run will select a topic, generate and review a structured script,
+create narration and visuals for each scene, render the media, produce subtitles
+and a thumbnail, run quality checks, and optionally upload privately to YouTube.
+
+We are building it in phases because media pipelines combine paid APIs,
+long-running FFmpeg jobs, filesystem state, and publishing credentials. Reliable
+orchestration must come first. The Phase 1 foundation prevents malformed plans,
+duplicate topic processing, lost progress, repeated paid requests, and accidental
+publishing from becoming structural problems later.
+
+Python owns workflow decisions and validation. Provider interfaces isolate paid
+services so vendors can be replaced, while deterministic mocks let the same
+pipeline run locally without credentials or API charges. FFmpeg will own audio
+and video processing rather than duplicating mature media behavior in Python.
 
 ## Current Features
 
@@ -20,6 +40,10 @@ replaceable providers generate content and FFmpeg performs media processing.
 - Atomic CSV and JSON writes to reduce corruption after interruption.
 - Filesystem-safe, unique run IDs and per-run output directories.
 - Deterministic mock LLM provider that requires no API key or network access.
+- OpenAI Responses API provider using native Pydantic structured outputs.
+- One corrected regeneration after malformed provider output.
+- Independent structured editorial review that blocks rejected plans.
+- Bounded retry handling for network and rate-limit failures.
 - Unit tests for configuration, models, topic handling, and pipeline state.
 
 ## Architecture
@@ -56,7 +80,7 @@ API calls.
 |   |-- config.py               # YAML and environment validation
 |   |-- models.py               # Structured video-plan models
 |   |-- state.py                # Atomic pipeline state
-|   |-- providers/              # Provider contracts and mocks
+|   |-- providers/              # Provider contracts, OpenAI adapter, and mocks
 |   |-- services/               # Topic and pipeline services
 |   `-- utils/                  # Shared filesystem helpers
 |-- tests/                      # Unit tests
@@ -157,6 +181,14 @@ The recognized variables are `LLM_API_KEY`, `LLM_MODEL`, `TTS_API_KEY`,
 `TTS_MODEL`, `TTS_VOICE_ID`, `IMAGE_API_KEY`, `IMAGE_MODEL`,
 `YOUTUBE_CLIENT_SECRETS_FILE`, and `YOUTUBE_TOKEN_FILE`.
 
+Set `LLM_API_KEY` and `LLM_MODEL` to use real OpenAI generation. The model name
+is configuration rather than a hard-coded project choice:
+
+```dotenv
+LLM_API_KEY=
+LLM_MODEL=
+```
+
 `.env`, OAuth client files, and token files are ignored by Git.
 
 ## Usage
@@ -198,10 +230,10 @@ subcommand:
 python -m youtube_automation --config config.example.yaml list-topics
 ```
 
-In Phase 1, `--mock-providers` is required. The `--privacy` and `--no-upload`
-options establish the future CLI contract; no upload is currently attempted.
-Public uploads will require an explicit `--privacy public` argument when upload
-support is added, and private will remain the default.
+Omit `--mock-providers` to use the configured OpenAI provider. The `--privacy`
+and `--no-upload` options establish the future CLI contract; no upload is
+currently attempted. Public uploads will require an explicit `--privacy public`
+argument when upload support is added, and private will remain the default.
 
 ## Topic Queue
 
@@ -227,12 +259,14 @@ Each invocation creates a unique directory under `output/`:
 output/
 `-- 20260830-120000-queued-topic-a1b2/
 		|-- state.json
+		|-- review.json
 		`-- video_plan.json
 ```
 
 `video_plan.json` contains validated metadata and five deterministic mock
-scenes. `state.json` records stage status, timestamps, attempt count, and output
-paths. Writes use a temporary file followed by an atomic replacement.
+	scenes in mock mode. `review.json` contains the independent editorial decision.
+	`state.json` records stage status, timestamps, attempt count, and output paths.
+	Writes use a temporary file followed by an atomic replacement.
 
 Later phases will add `audio/`, `images/`, `clips/`, `subtitles/`, `thumbnail/`,
 `logs/`, and `final/` directories within each run.
@@ -267,12 +301,11 @@ Tests never call paid providers or upload content.
 
 ## Roadmap
 
-1. Add real LLM generation, correction, and review providers.
-2. Add per-scene TTS and image providers with retry and caching behavior.
-3. Generate subtitles, animated scene clips, final video, and thumbnail.
-4. Add media and metadata quality reports.
-5. Add resumable private YouTube uploads with duplicate-upload protection.
-6. Complete integration tests and production operations documentation.
+1. Add per-scene TTS and image providers with retry and caching behavior.
+2. Generate subtitles, animated scene clips, final video, and thumbnail.
+3. Add media and metadata quality reports.
+4. Add resumable private YouTube uploads with duplicate-upload protection.
+5. Complete integration tests and production operations documentation.
 
 ## Troubleshooting
 

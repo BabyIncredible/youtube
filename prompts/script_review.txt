@@ -1,0 +1,5 @@
+Review the supplied video plan for factual caution, logical flow, repetition,
+unsupported claims, invented sources, confidential information, unresolved
+placeholders, unsafe image requests, and suitability for spoken educational
+narration. Do not rewrite the plan. Approve it only when no blocking issue
+remains. Return only the structured review result required by the schema.

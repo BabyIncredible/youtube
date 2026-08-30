@@ -9,6 +9,7 @@ description = "Resumable faceless YouTube video production pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "openai>=3.6,<4",
     "pydantic>=2.10,<3",
     "python-dotenv>=1.0,<2",
     "PyYAML>=6.0,<7",

@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+
+
+_url_adapter = TypeAdapter(AnyHttpUrl)
+
+
+def _validate_urls(urls: list[str]) -> list[str]:
+    """Validate URLs without adding unsupported URI formats to provider schemas."""
+    for url in urls:
+        _url_adapter.validate_python(url)
+    return urls
 
 
 class Scene(BaseModel):
@@ -16,8 +26,10 @@ class Scene(BaseModel):
     visual_type: Literal["generated_image", "diagram", "stock_video"]
     visual_prompt: str = Field(min_length=1)
     on_screen_text: str = Field(max_length=80)
-    transition: str = Field(default="fade", min_length=1)
-    source_urls: list[AnyHttpUrl] = Field(default_factory=list)
+    transition: str = Field(min_length=1)
+    source_urls: list[str]
+
+    _validate_source_urls = field_validator("source_urls")(_validate_urls)
 
 
 class ThumbnailPlan(BaseModel):
@@ -47,10 +59,12 @@ class VideoPlan(BaseModel):
     hook: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     tags: list[str] = Field(min_length=1)
-    source_urls: list[AnyHttpUrl] = Field(default_factory=list)
+    source_urls: list[str]
     scenes: list[Scene] = Field(min_length=5, max_length=20)
     thumbnail: ThumbnailPlan
     contains_realistic_synthetic_media: bool
+
+    _validate_source_urls = field_validator("source_urls")(_validate_urls)
 
     @field_validator("tags")
     @classmethod
@@ -72,3 +86,12 @@ class VideoPlan(BaseModel):
         if actual != expected:
             raise ValueError(f"scene IDs must be sequential; expected {expected}")
         return self
+
+
+class ReviewResult(BaseModel):
+    """Structured editorial decision returned by the LLM review pass."""
+
+    model_config = ConfigDict(extra="forbid")
+    approved: bool
+    issues: list[str]
+    summary: str = Field(min_length=1)
