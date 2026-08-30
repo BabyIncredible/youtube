@@ -1,0 +1,903 @@
+You are a senior Python architect and automation engineer. Build a complete, production-oriented Python project that automatically creates a faceless YouTube video and optionally uploads it to YouTube.
+
+Do not create one enormous Python file. Use a clean, modular architecture with separate components for topic selection, script generation, voice generation, visual generation, video rendering, thumbnail creation, quality validation and YouTube uploading.
+
+Before writing code:
+
+1. Inspect the current workspace.
+2. Present a short implementation plan.
+3. List the files you will create.
+4. Identify external dependencies and system dependencies.
+5. Then implement the project phase by phase.
+6. After every phase, run the relevant tests and fix errors before continuing.
+7. Do not leave important functions as pseudocode, TODOs or empty placeholders unless an external credential is genuinely required.
+8. If API credentials are unavailable, create functional mock providers so the pipeline can still be tested locally.
+
+# Primary objective
+
+The project must execute this workflow:
+
+1. Select an unused topic from a CSV file.
+2. Ask an LLM API to generate:
+
+   * Video title
+   * Video description
+   * Narration
+   * Scene-by-scene visual plan
+   * On-screen text
+   * Image-generation prompts
+   * Tags
+   * Thumbnail text and image prompt
+3. Validate the generated structured response.
+4. Generate an AI voice-over for every scene.
+5. Generate an image for every scene.
+6. Measure the actual duration of each narration file.
+7. Create one video clip per scene using the generated image and narration.
+8. Add subtle pan-and-zoom animation to still images.
+9. Add readable on-screen text.
+10. Generate subtitles.
+11. Combine all scene clips into one 1920×1080 MP4 video.
+12. Optionally add quiet background music.
+13. Generate a 1280×720 thumbnail.
+14. Perform automated audio, video and metadata quality checks.
+15. Upload the video and thumbnail to YouTube as private by default.
+16. Save all intermediate files, logs and pipeline state.
+17. Mark the topic as completed only after the pipeline succeeds.
+18. Support resuming a failed run without regenerating successful assets.
+
+Python coordinates the pipeline. FFmpeg performs the actual audio and video rendering.
+
+# Technical requirements
+
+Use:
+
+* Python 3.11 or newer
+* Type hints throughout
+* Pydantic v2 for configuration and structured-data validation
+* An LLM provider API for script and scene generation
+* A text-to-speech provider API for narration
+* An image-generation provider API for scene images
+* FFmpeg and ffprobe for video and media processing
+* Pillow for thumbnail generation
+* Google YouTube Data API v3 for uploading
+* pytest for tests
+* tenacity or an equivalent library for bounded retry handling
+* python-dotenv for local environment-variable loading
+* PyYAML for configuration
+* Standard Python logging
+* pathlib instead of manually constructed path strings
+
+Where practical, define provider interfaces so services can be replaced later.
+
+Do not hard-code a specific AI model name throughout the code. Model names must be configurable through environment variables or config.yaml.
+
+# Proposed project structure
+
+Create a project resembling:
+
+youtube-automation/
+README.md
+pyproject.toml
+.gitignore
+.env.example
+config.example.yaml
+topics.csv
+assets/
+music/
+README.md
+fonts/
+README.md
+prompts/
+topic_generation.txt
+script_generation.txt
+script_review.txt
+src/
+youtube_automation/
+**init**.py
+**main**.py
+cli.py
+config.py
+logging_config.py
+exceptions.py
+models.py
+pipeline.py
+state.py
+utils/
+**init**.py
+files.py
+media.py
+text.py
+subprocesses.py
+providers/
+**init**.py
+base.py
+llm.py
+tts.py
+images.py
+mock.py
+services/
+**init**.py
+topic_service.py
+script_service.py
+narration_service.py
+visual_service.py
+subtitle_service.py
+render_service.py
+thumbnail_service.py
+quality_service.py
+youtube_service.py
+tests/
+test_config.py
+test_models.py
+test_topic_service.py
+test_script_service.py
+test_subtitle_service.py
+test_pipeline_state.py
+test_quality_service.py
+fixtures/
+sample_script.json
+output/
+.gitkeep
+
+You may adjust this structure when technically justified, but preserve separation of responsibilities.
+
+# Command-line interface
+
+Support commands similar to:
+
+python -m youtube_automation run
+
+python -m youtube_automation run 
+--topic "How Secure Boot Protects Firmware" 
+--privacy private
+
+python -m youtube_automation run 
+--no-upload
+
+python -m youtube_automation run 
+--dry-run
+
+python -m youtube_automation run 
+--mock-providers 
+--no-upload
+
+python -m youtube_automation resume 
+--run-id 20260829-secure-boot
+
+python -m youtube_automation validate 
+--run-id 20260829-secure-boot
+
+python -m youtube_automation list-topics
+
+CLI requirements:
+
+* Use argparse or Typer.
+* Show useful help text.
+* Return nonzero exit codes on failures.
+* Never expose secrets in console output.
+* Log the run ID and output directory.
+* Require explicit `--privacy public` before a public upload is allowed.
+* Default to private uploads.
+* Support stopping after an individual stage for debugging.
+* Support `--mock-providers` so the pipeline can run without paid API calls.
+
+# Configuration
+
+Read non-secret settings from config.yaml and secrets from environment variables.
+
+Example environment variables:
+
+LLM_API_KEY=
+LLM_MODEL=
+TTS_API_KEY=
+TTS_MODEL=
+TTS_VOICE_ID=
+IMAGE_API_KEY=
+IMAGE_MODEL=
+YOUTUBE_CLIENT_SECRETS_FILE=
+YOUTUBE_TOKEN_FILE=
+
+The `.env.example` file must contain names only, never real secrets.
+
+Example config fields:
+
+channel:
+name: "Firmware Explained"
+default_language: "en"
+category_id: "28"
+default_privacy: "private"
+made_for_kids: false
+
+video:
+width: 1920
+height: 1080
+fps: 30
+video_codec: "libx264"
+audio_codec: "aac"
+audio_bitrate: "192k"
+target_loudness_lufs: -14
+minimum_duration_seconds: 60
+maximum_duration_seconds: 900
+
+scenes:
+minimum_count: 5
+maximum_count: 20
+maximum_on_screen_text_length: 80
+default_transition_seconds: 0.5
+
+thumbnail:
+width: 1280
+height: 720
+maximum_text_words: 6
+
+pipeline:
+output_directory: "output"
+retry_attempts: 3
+keep_intermediate_files: true
+upload_after_render: false
+upload_privacy: "private"
+
+Validate configuration at startup. Produce understandable error messages for missing or invalid values.
+
+# Topics file
+
+Create topics.csv with columns:
+
+topic_id,title,audience,status,priority,created_at,completed_at,run_id
+
+Valid status values:
+
+* pending
+* processing
+* completed
+* failed
+
+The topic selector must:
+
+1. Select the highest-priority pending topic.
+2. Mark it processing using an atomic update.
+3. Associate it with the current run ID.
+4. Mark it completed only after successful pipeline completion.
+5. Mark it failed if the pipeline permanently fails.
+6. Avoid processing the same topic twice.
+7. Permit a topic to be supplied directly through the CLI.
+
+Provide sample generic topics such as:
+
+* How Secure Boot Protects Firmware
+* What Is OTP Memory?
+* Bootloader vs Firmware
+* How Digital Signatures Protect Embedded Devices
+* What Happens Before main() in an Embedded System?
+
+Do not include confidential company information, proprietary chip details or internal source code.
+
+# Structured script model
+
+The LLM must return JSON—not Markdown.
+
+Define and validate Pydantic models equivalent to:
+
+VideoPlan:
+topic: str
+title: str
+description: str
+audience: str
+hook: str
+summary: str
+tags: list[str]
+source_urls: list[str]
+scenes: list[Scene]
+thumbnail: ThumbnailPlan
+contains_realistic_synthetic_media: bool
+
+Scene:
+scene_id: int
+narration: str
+visual_type: str
+visual_prompt: str
+on_screen_text: str
+transition: str
+source_urls: list[str]
+
+ThumbnailPlan:
+text: str
+image_prompt: str
+
+Validation requirements:
+
+* Scene IDs must be sequential.
+* Every scene must contain narration.
+* Every scene must have a supported visual type.
+* On-screen text must remain within the configured limit.
+* Thumbnail text must contain no more than six words.
+* Title and description must satisfy YouTube length limits.
+* Tags must be unique after case-insensitive normalization.
+* The script must contain the expected minimum and maximum number of scenes.
+* URLs must be syntactically valid.
+* Reject an invalid plan and request one corrected regeneration.
+* Do not silently continue with malformed AI output.
+
+# Prompt requirements
+
+Create prompt templates under prompts/.
+
+The script-generation prompt must instruct the model to:
+
+* Write for spoken narration.
+* Use short, natural sentences.
+* Begin with a concise hook.
+* Explain one clear topic.
+* Avoid filler and repetition.
+* Produce a logical beginning, middle and conclusion.
+* Avoid unsupported claims.
+* Never invent sources.
+* Never copy passages from source material.
+* Mark uncertain claims for rejection or review.
+* Avoid references to internal or confidential information.
+* Return only valid JSON matching the provided schema.
+* Make each scene visually distinct.
+* Avoid generic requests such as “show technology”.
+* Produce specific, safe image prompts.
+* Avoid logos, copyrighted characters and identifiable public figures.
+* Keep thumbnail wording concise.
+
+Store prompts as external text files rather than large string literals embedded in Python.
+
+# Provider architecture
+
+Create abstract interfaces or protocols for:
+
+LLMProvider:
+generate_video_plan(topic, audience, sources) -> VideoPlan
+review_video_plan(plan) -> ReviewResult
+
+TTSProvider:
+generate_speech(text, output_path, previous_text, next_text) -> AudioAsset
+
+ImageProvider:
+generate_image(prompt, output_path, width, height) -> ImageAsset
+
+Implement real provider classes using current official SDK patterns.
+
+Also implement mock providers:
+
+* MockLLMProvider returns deterministic fixture data.
+* MockTTSProvider creates valid silent or synthetic test audio of a known duration.
+* MockImageProvider creates labelled placeholder images using Pillow.
+
+Mock mode must allow the entire render pipeline to be tested without network calls.
+
+Use dependency injection. The pipeline must not instantiate API clients directly inside business-logic methods.
+
+# Narration generation
+
+Generate narration per scene rather than as one large audio request.
+
+Requirements:
+
+* Save audio as scene_001.mp3 or a consistent alternative.
+* Store provider response metadata.
+* Determine the real duration using ffprobe.
+* Retry transient provider failures with exponential backoff.
+* Never retry authentication errors indefinitely.
+* Provide previous and next narration context to the provider when supported.
+* Normalize audio before final rendering.
+* Detect empty or implausibly short audio.
+* Escape and handle punctuation and Unicode safely.
+* Make the selected voice configurable.
+* Include an optional technical-pronunciation dictionary.
+
+Create a sample pronunciation dictionary for terms such as:
+
+ECDSA
+NVRAM
+AUTOSAR
+SHA-256
+Cortex-M4
+SoC
+API
+TLS
+Wi-Fi
+
+# Visual generation
+
+Generate one 16:9 visual for each scene.
+
+Requirements:
+
+* Use 1920×1080 or a configurable source resolution.
+* Save images using sequential names.
+* Validate image dimensions and file integrity.
+* Retry transient failures.
+* Avoid regenerating an already valid visual during resume.
+* Store the original prompt and provider metadata.
+* Add padding or crop safely without distorting aspect ratio.
+* Keep important visual elements away from screen edges.
+* Support a mock placeholder image.
+* Design the interface so diagram and stock-video providers can be added later.
+
+For the first working version, generated images plus text overlays are sufficient. Do not make full AI-generated moving video a mandatory dependency.
+
+# Subtitles
+
+Generate an SRT subtitle file.
+
+Prefer scene narration and known audio duration to create approximate subtitle timing. Split long narration into readable subtitle chunks.
+
+Subtitle requirements:
+
+* No more than approximately two lines at once.
+* Avoid extremely long lines.
+* Use scene audio durations to keep timing synchronized.
+* Prevent overlapping timestamps.
+* Ensure the final subtitle end time does not exceed video duration.
+* Support Unicode.
+* Save a complete final.srt file.
+* Add unit tests for timing and text splitting.
+
+If word-level timestamps are available from the TTS provider, design the code to use them.
+
+# FFmpeg rendering
+
+Use FFmpeg through Python subprocess calls.
+
+Security requirements:
+
+* Do not use `shell=True`.
+* Pass commands as argument lists.
+* Log a safely redacted representation of the command.
+* Capture stdout and stderr.
+* Raise a custom exception containing useful FFmpeg error context.
+* Check FFmpeg and ffprobe availability at startup.
+
+For each scene:
+
+1. Use the scene image as the visual source.
+2. Match clip duration to narration duration.
+3. Apply a subtle zoompan or pan effect.
+4. Add narration.
+5. Add optional on-screen text.
+6. Add fade-in/fade-out or another configured transition.
+7. Render to a consistent intermediate format.
+
+After rendering all scenes:
+
+1. Concatenate them in order.
+2. Mix optional background music at a low volume.
+3. Loop or trim background music safely.
+4. Normalize or constrain final audio loudness.
+5. Attach or burn subtitles based on configuration.
+6. Export an MP4 using H.264 and AAC.
+7. Use a broadly compatible pixel format such as yuv420p.
+8. Enable fast-start metadata when appropriate.
+9. Verify the final file with ffprobe.
+
+Text overlays must:
+
+* Be large enough for 1080p.
+* Use a configurable font.
+* Have strong contrast.
+* Include a semi-transparent background or shadow.
+* Respect safe margins.
+* Correctly escape special characters.
+* Fall back gracefully when the configured font is unavailable.
+
+# Thumbnail generation
+
+Generate a 1280×720 thumbnail using Pillow.
+
+Requirements:
+
+* Use the generated thumbnail background.
+* Apply a darkened or blurred region behind text when needed.
+* Overlay a maximum of six words.
+* Use large, readable typography.
+* Preserve safe margins.
+* Avoid text clipping.
+* Add optional channel branding.
+* Keep final file within YouTube’s thumbnail file-size limit.
+* Validate final dimensions and format.
+* Save thumbnail.png.
+
+Create helper functions that automatically reduce font size when text does not fit.
+
+# Pipeline state and resumability
+
+Every run must have a unique, filesystem-safe run ID.
+
+Example output structure:
+
+output/
+20260829-secure-boot/
+state.json
+video_plan.json
+metadata.json
+logs/
+pipeline.log
+audio/
+scene_001.mp3
+images/
+scene_001.png
+clips/
+scene_001.mp4
+subtitles/
+final.srt
+thumbnail/
+thumbnail.png
+final/
+video.mp4
+
+The state file must record stages such as:
+
+* topic_selected
+* plan_generated
+* plan_validated
+* narration_generated
+* visuals_generated
+* scenes_rendered
+* video_rendered
+* thumbnail_generated
+* quality_passed
+* uploaded
+
+For every stage, record:
+
+* status
+* start time
+* completion time
+* output paths
+* error summary
+* attempt count
+
+Use atomic file writes for state files. A crash must not corrupt state.json.
+
+When resuming:
+
+* Verify previously generated files.
+* Skip a completed stage only if its files still exist and pass validation.
+* Re-run only missing, corrupt or failed stages.
+* Do not upload the same video twice.
+* Store the YouTube video ID immediately after a successful upload.
+
+# Quality checks
+
+Implement automated validation before upload.
+
+At minimum, check:
+
+Video:
+
+* File exists and is not empty.
+* FFprobe can read it.
+* Resolution matches configuration.
+* Video and audio streams both exist.
+* Duration is within configured limits.
+* Duration approximately matches total scene narration.
+* Frame rate is plausible.
+* Pixel format is compatible.
+
+Audio:
+
+* Audio stream exists.
+* Narration is not silent.
+* No unexpectedly long silence.
+* Loudness is within an acceptable configured range.
+* No narration file has zero duration.
+
+Images:
+
+* Every scene has a valid image.
+* Images have usable dimensions.
+* No required asset is missing.
+
+Metadata:
+
+* Title is present and within the allowed length.
+* Description is present.
+* Tags are normalized.
+* Thumbnail has correct dimensions.
+* Privacy defaults to private.
+* Made-for-kids must be explicitly configured.
+* Synthetic-media status must be represented in the metadata.
+
+Content:
+
+* Every scene contains narration.
+* No duplicate scene IDs.
+* No unresolved placeholders such as TODO, VERIFY or INSERT_SOURCE.
+* No secret or API-key patterns appear in generated output.
+* No prohibited confidential keywords from a configurable denylist appear.
+* Similarity between scenes is not excessively high.
+
+Write a human-readable quality_report.json containing every check, result and explanation. Do not upload if any mandatory check fails.
+
+# YouTube upload
+
+Use OAuth 2.0 and the YouTube Data API v3.
+
+Requirements:
+
+* Default privacy must be private.
+* Public upload requires explicit `--privacy public`.
+* Use resumable upload.
+* Upload the MP4.
+* Set title, description, tags, category and language.
+* Set made-for-kids status explicitly.
+* Set scheduled publishing time when provided.
+* Represent the synthetic-media disclosure where supported.
+* Upload the thumbnail after the video upload succeeds.
+* Store returned video ID and URL.
+* Handle quota, authorization and network errors clearly.
+* Prevent duplicate uploads during resumed runs.
+* Never log OAuth tokens or client secrets.
+* Keep OAuth token files outside version control.
+* Explain in README how initial interactive OAuth authorization works.
+* Explain that an unverified YouTube API project may restrict API uploads to private status until the project passes the necessary audit.
+
+Do not automatically create or expose an AdSense account.
+
+# Error handling
+
+Create custom exceptions for:
+
+* ConfigurationError
+* ProviderAuthenticationError
+* ProviderRateLimitError
+* ProviderResponseError
+* MediaProcessingError
+* QualityCheckError
+* UploadError
+* PipelineStateError
+
+Differentiate between:
+
+* Retryable network/rate-limit errors
+* Invalid API credentials
+* Invalid AI output
+* Missing FFmpeg
+* Corrupt generated assets
+* YouTube authorization errors
+* Quality-check failures
+
+Retries must be bounded. Never create an infinite loop.
+
+If the pipeline fails:
+
+1. Log the failed stage.
+2. Save the exception summary in state.json.
+3. Preserve already generated files.
+4. Mark the topic failed or resumable as appropriate.
+5. Print the exact resume command.
+
+# Logging
+
+Configure both console and file logging.
+
+Requirements:
+
+* Timestamp
+* Log level
+* Module name
+* Run ID
+* Stage name
+* Helpful human-readable message
+
+Never log:
+
+* API keys
+* OAuth tokens
+* Authorization headers
+* Entire sensitive API responses
+
+Implement a redaction helper for secrets.
+
+# Code documentation
+
+The code is intended for someone learning how the automation works.
+
+Therefore:
+
+* Add a module-level docstring to every module.
+* Add descriptive docstrings to every public class and function.
+* Explain function inputs, outputs, exceptions and side effects.
+* Add comments for non-obvious FFmpeg commands.
+* Explain why architectural decisions are made.
+* Use meaningful variable and function names.
+* Avoid obvious comments such as `# increment i`.
+* Comment important API, filesystem, retry and synchronization logic.
+* Include type hints throughout.
+* Keep functions focused and reasonably short.
+* Follow PEP 8.
+* Avoid unnecessary abstraction that makes the code difficult to understand.
+
+# Testing
+
+Write unit tests for:
+
+* Configuration validation
+* Video-plan JSON validation
+* Sequential scene IDs
+* Invalid and excessive on-screen text
+* Topic selection
+* Topic status updates
+* Atomic state writes
+* Resume behaviour
+* Subtitle splitting
+* Subtitle timestamp ordering
+* Thumbnail text fitting
+* FFmpeg/ffprobe command construction
+* Quality checks
+* Secret redaction
+* Duplicate-upload prevention
+
+Use temporary directories in tests.
+
+Do not make real paid API calls during unit tests. Mock external services.
+
+Add at least one integration-style test that runs:
+
+Mock topic
+→ Mock script
+→ Mock narration
+→ Placeholder visuals
+→ FFmpeg render
+→ Quality validation
+→ No upload
+
+Skip the integration test with a clear reason if FFmpeg is unavailable.
+
+# README
+
+Write a detailed beginner-friendly README containing:
+
+1. What the project does
+2. Architecture diagram using Mermaid
+3. Pipeline stages
+4. Project structure
+5. Required software
+6. FFmpeg installation for:
+
+   * Ubuntu/WSL
+   * Windows
+   * macOS
+7. Python virtual-environment creation
+8. Dependency installation
+9. Environment-variable configuration
+10. Configuration-file explanation
+11. Google Cloud and YouTube API setup
+12. Initial OAuth authorization
+13. Running in mock mode
+14. Running without upload
+15. Running with private upload
+16. Resuming a failed run
+17. Where generated files are stored
+18. How to add topics
+19. How to change the AI voice
+20. How to change prompts
+21. Troubleshooting
+22. Cost-control guidance
+23. Security recommendations
+24. YouTube AI-disclosure and originality reminder
+25. Known limitations
+
+Include exact example commands.
+
+# Security rules
+
+* Never commit `.env`.
+* Never commit OAuth token files.
+* Never embed secrets in code.
+* Never use `shell=True`.
+* Validate all generated filenames.
+* Prevent path traversal from AI-generated titles.
+* Sanitize run IDs and filenames.
+* Avoid downloading arbitrary URLs returned by the model.
+* Allow downloads only through trusted providers or an allowlist.
+* Set HTTP timeouts.
+* Set maximum response and download sizes.
+* Do not execute any code generated by the LLM.
+* Do not render arbitrary untrusted HTML.
+* Do not expose internal files in prompts.
+* Add appropriate patterns to `.gitignore`.
+
+# Content-safety and originality rules
+
+The generated system must not:
+
+* Scrape and read an article verbatim.
+* Copy another YouTube video’s script.
+* Download copyrighted YouTube clips.
+* Clone another person’s voice without consent.
+* Use copyrighted background music without a licence.
+* Generate deceptive realistic events.
+* Present invented sources as real.
+* Use confidential employer data.
+* Publish automatically when quality validation fails.
+
+The program should automate production while still generating materially different and educational content for every video.
+
+# Implementation phases
+
+Implement in this order:
+
+Phase 1:
+
+* Project scaffold
+* Configuration
+* Data models
+* Topic CSV handling
+* State management
+* CLI
+* Mock providers
+* Basic unit tests
+
+Phase 2:
+
+* Real LLM provider
+* Structured script generation
+* Script validation
+* Script review
+* Tests with mocked API responses
+
+Phase 3:
+
+* TTS provider
+* Image provider
+* Media metadata helpers
+* Narration and visual generation
+* Retry and caching logic
+
+Phase 4:
+
+* Subtitle generation
+* Per-scene FFmpeg rendering
+* Final concatenation
+* Optional music mixing
+* Thumbnail generation
+
+Phase 5:
+
+* Quality validation
+* Quality report
+* YouTube OAuth upload
+* Thumbnail upload
+* Duplicate-upload protection
+
+Phase 6:
+
+* Complete test suite
+* End-to-end mock integration test
+* README
+* Example configuration
+* Final linting and type checking
+
+After every phase:
+
+1. Show which files were created or changed.
+2. Explain the important code in straightforward language.
+3. Run tests.
+4. Report test results.
+5. Fix failures before continuing.
+
+# Acceptance criteria
+
+The implementation is complete only when:
+
+1. `python -m youtube_automation --help` works.
+2. Mock mode runs without paid API credentials.
+3. Mock mode produces a valid MP4 when FFmpeg is installed.
+4. The final video contains both audio and video streams.
+5. A valid subtitle file is generated.
+6. A valid 1280×720 thumbnail is generated.
+7. Pipeline state is saved.
+8. A failed run can be resumed.
+9. Private YouTube upload is implemented.
+10. Public upload cannot occur accidentally.
+11. Automated tests pass.
+12. No secret is present in the repository.
+13. README instructions are sufficient for a new user.
+14. Important code contains explanatory docstrings and useful comments.
+15. There are no critical TODOs or unimplemented placeholder methods.
+
+Begin by inspecting the workspace and presenting the implementation plan. Do not start by placing the entire project into a single file.

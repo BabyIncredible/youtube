@@ -1,0 +1,6 @@
+topic_id,title,audience,status,priority,created_at,completed_at,run_id
+secure-boot,How Secure Boot Protects Firmware,embedded systems learners,pending,100,2026-08-30,,
+otp-memory,What Is OTP Memory?,electronics learners,pending,90,2026-08-30,,
+bootloader-firmware,Bootloader vs Firmware,software developers,pending,80,2026-08-30,,
+digital-signatures,How Digital Signatures Protect Embedded Devices,security learners,pending,70,2026-08-30,,
+before-main,What Happens Before main() in an Embedded System?,embedded developers,pending,60,2026-08-30,,

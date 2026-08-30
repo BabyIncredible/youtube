@@ -1,0 +1,6 @@
+Write concise spoken narration for one educational topic. Return only valid
+JSON matching the supplied schema. Begin with a short hook, avoid filler,
+repetition, unsupported claims, invented sources, copied passages, confidential
+information, logos, copyrighted characters, and identifiable public figures.
+Make every scene visually distinct with a specific safe image prompt. Mark any
+uncertain claim for rejection. Keep thumbnail wording to six words or fewer.

@@ -1,0 +1,25 @@
+channel:
+  name: "Firmware Explained"
+  default_language: "en"
+  category_id: "28"
+  default_privacy: "private"
+  made_for_kids: false
+
+video:
+  width: 1920
+  height: 1080
+  fps: 30
+  minimum_duration_seconds: 60
+  maximum_duration_seconds: 900
+
+scenes:
+  minimum_count: 5
+  maximum_count: 20
+  maximum_on_screen_text_length: 80
+
+pipeline:
+  output_directory: "output"
+  retry_attempts: 3
+  keep_intermediate_files: true
+  upload_after_render: false
+  upload_privacy: "private"
